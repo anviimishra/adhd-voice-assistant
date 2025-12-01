@@ -1,0 +1,92 @@
+body {
+  width: 340px;
+  padding: 15px;
+  background: #121418;
+  font-family: 'Inter', sans-serif;
+  color: white;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 15px;
+}
+
+h1 {
+  font-size: 18px;
+  margin: 0;
+  color: #e3e3e3;
+}
+
+.mode-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mode-btn {
+  padding: 12px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  background: #1f2327;
+  color: white;
+  font-size: 15px;
+  transition: 0.2s;
+}
+
+.mode-btn:hover {
+  background: #2d3237;
+}
+
+.voice-mode {
+  background: #764ba2;
+}
+
+.voice-mode:hover {
+  background: #8c63bf;
+}
+
+.hidden {
+  display: none;
+}
+
+#micBtn {
+  width: 75px;
+  height: 75px;
+  border-radius: 50%;
+  background: #764ba2;
+  color: white;
+  font-size: 32px;
+  border: none;
+  cursor: pointer;
+  margin: 15px auto;
+  display: block;
+  transition: 0.3s;
+}
+
+#micBtn.recording {
+  background: #d63b3b;
+  animation: pulse 1.5s infinite;
+}
+
+.status {
+  margin-top: 10px;
+  text-align: center;
+  opacity: 0.8;
+  font-size: 14px;
+}
+
+.label {
+  font-size: 12px;
+  margin-top: 10px;
+  opacity: 0.7;
+}
+
+#transcript, #response {
+  background: #1f2327;
+  padding: 10px;
+  border-radius: 8px;
+  min-height: 50px;
+  margin-top: 5px;
+  font-size: 14px;
+}

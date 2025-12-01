@@ -126,7 +126,7 @@ def calendar_auth():
 
         authorization_url, state = flow.authorization_url(
             access_type="offline",
-            include_granted_scopes="true",
+            include_granted_scopes="false",
             prompt="consent",
         )
 
@@ -171,6 +171,37 @@ def calendar_oauth2callback():
     except Exception as e:
         print(f"OAuth callback error: {e}")
         return f"<h2>OAuth Error</h2><p>{str(e)}</p><p>Please try again at <a href='/calendar/auth'>/calendar/auth</a></p>", 500
+
+
+@app.route('/calendar/add-event', methods=['POST'])
+def add_calendar_event():
+    """
+    Add an event to Google Calendar
+    Expects JSON: {
+        "summary": "Event title",
+        "start": "2025-12-01T14:00:00",
+        "end": "2025-12-01T15:00:00",
+        "description": "Optional description"
+    }
+    """
+    try:
+        from calendar_tool import add_event
+        
+        data = request.json
+        summary = data.get('summary')
+        start = data.get('start')
+        end = data.get('end')
+        description = data.get('description', '')
+        
+        if not summary or not start or not end:
+            return jsonify({"error": "Missing required fields: summary, start, end"}), 400
+        
+        result = add_event(summary, start, end, description)
+        return jsonify({"success": True, "event": result})
+    
+    except Exception as e:
+        print(f"Add event error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == '__main__':

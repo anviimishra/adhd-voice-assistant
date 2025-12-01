@@ -2,106 +2,45 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <style>
-    body {
-      width: 350px;
-      padding: 20px;
-      font-family: Arial, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-    }
-    
-    .container {
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(10px);
-      border-radius: 15px;
-      padding: 20px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-    }
-    
-    h1 {
-      margin: 0 0 20px 0;
-      font-size: 24px;
-      text-align: center;
-    }
-    
-    #micBtn {
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      border: none;
-      background: white;
-      color: #667eea;
-      font-size: 36px;
-      cursor: pointer;
-      display: block;
-      margin: 0 auto 20px;
-      transition: all 0.3s;
-    }
-    
-    #micBtn:hover {
-      transform: scale(1.1);
-      box-shadow: 0 5px 20px rgba(255, 255, 255, 0.3);
-    }
-    
-    #micBtn.recording {
-      background: #ff4444;
-      color: white;
-      animation: pulse 1.5s infinite;
-    }
-    
-    @keyframes pulse {
-      0%, 100% { transform: scale(1); }
-      50% { transform: scale(1.05); }
-    }
-    
-    #status {
-      text-align: center;
-      margin: 10px 0;
-      min-height: 24px;
-      font-weight: bold;
-    }
-    
-    #transcript {
-      background: rgba(255, 255, 255, 0.2);
-      padding: 15px;
-      border-radius: 10px;
-      min-height: 60px;
-      margin: 15px 0;
-      font-size: 14px;
-    }
-    
-    #response {
-      background: rgba(255, 255, 255, 0.15);
-      padding: 15px;
-      border-radius: 10px;
-      min-height: 60px;
-      font-size: 14px;
-      margin-top: 10px;
-    }
-    
-    .label {
-      font-weight: bold;
-      margin-bottom: 5px;
-      font-size: 12px;
-      text-transform: uppercase;
-      opacity: 0.8;
-    }
-  </style>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="container">
-    <h1>🎤 Voice Assistant</h1>
-    
-    <button id="micBtn">🎤</button>
-    
-    <div id="status">Click microphone to start</div>
-    
-    <div class="label">You said:</div>
-    <div id="transcript">...</div>
-    
-    <div class="label">Assistant:</div>
-    <div id="response">...</div>
+
+  <div class="header">
+    <h1>ADHD Study Assistant</h1>
+  </div>
+
+  <div class="mode-buttons">
+
+    <button id="syllabusBtn" class="mode-btn">
+      📘 Syllabus Planner
+    </button>
+
+    <button id="studyModeBtn" class="mode-btn">
+      🎯 Study Mode
+    </button>
+
+    <button id="voiceBtn" class="mode-btn voice-mode">
+      🎤 Voice Assistant
+    </button>
+
+  </div>
+
+  <div id="modeContainer">
+
+    <div id="status" class="status">Ready</div>
+
+    <!-- Voice mode area -->
+    <div id="voiceControls" class="hidden">
+      <button id="micBtn">🎤</button>
+
+      <div class="label">You said:</div>
+      <div id="transcript">...</div>
+
+      <div class="label">Assistant:</div>
+      <div id="response">...</div>
+    </div>
+
   </div>
 
   <script src="popup.js"></script>

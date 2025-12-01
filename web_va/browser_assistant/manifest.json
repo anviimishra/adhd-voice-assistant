@@ -1,18 +1,31 @@
 {
   "manifest_version": 3,
-  "name": "Voice Assistant",
-  "version": "1.0",
-  "description": "AI-powered voice assistant for your browser",
-  "permissions": [
-    "activeTab",
-    "storage",
-    "tabCapture",
-  "audioCapture"  ],
+  "name": "ADHD Study Assistant",
+  "version": "1.0.0",
+  "description": "Syllabus Planner, Study Mode, and Voice Assistant for ADHD-friendly studying.",
+
   "action": {
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_title": "ADHD Study Assistant"
   },
-  "host_permissions": [
-    "http://localhost:5050/*"
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "scripting",
+    "storage",
+    "notifications"
   ],
-  "options_page": "mic.html"
+
+  "host_permissions": [
+    "<all_urls>"
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
 }
