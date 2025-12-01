@@ -274,3 +274,39 @@ You're all set! Need anything else? 🌟
     )
 
     return completion.choices[0].message.content.strip()
+
+
+def generate_study_plan_from_syllabus(syllabus_text: str) -> str:
+    """
+    Produce an ADHD-friendly study plan derived from syllabus text.
+    """
+    context = (syllabus_text or "").strip()
+    if len(context) > 6000:
+        context = context[:6000]
+
+    prompt = f"""
+You are ADHDWiz, a compassionate focus coach.
+
+Create a motivational week-by-week study roadmap from the syllabus notes below.
+Each week should include:
+- Theme or chapter focus
+- 2-3 micro-actions (prefer verbs)
+- Estimated total hours
+- Tiny accountability or reward idea
+
+If info is missing, infer reasonable topics and keep it 6-8 weeks long.
+
+Syllabus notes:
+\"\"\"{context or "No syllabus text was provided. Build a balanced 6-week plan for a college course."}\"\"\"
+"""
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "You design concise, ADHD-friendly study roadmaps."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.4
+    )
+
+    return response.choices[0].message.content.strip()

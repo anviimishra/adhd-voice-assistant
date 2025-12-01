@@ -1,8 +1,19 @@
 const API_BASE = 'http://localhost:5050';
 
 const statusEl = document.getElementById('status');
+const dropZoneWrapper = document.getElementById('dropZoneWrapper');
 const micBtn = document.getElementById('micBtn');
 const voiceControls = document.getElementById('voiceControls');
+const syllabusControls = document.getElementById('syllabusControls');
+const syllabusDropZone = document.getElementById('syllabusDropZone');
+const browseSyllabusBtn = document.getElementById('browseSyllabusBtn');
+const syllabusFileInput = document.getElementById('syllabusFileInput');
+const uploadSyllabusBtn = document.getElementById('uploadSyllabusBtn');
+const syllabusStatus = document.getElementById('syllabusStatus');
+const syllabusFileName = document.getElementById('syllabusFileName');
+const downloadPlanBtn = document.getElementById('downloadPlanBtn');
+browseSyllabusBtn.addEventListener('click', () => syllabusFileInput.click());
+
 
 const transcript = document.getElementById('transcript');
 const response = document.getElementById('response');
@@ -13,6 +24,8 @@ document.getElementById('syllabusBtn').onclick = () => activateMode("syllabus");
 document.getElementById('studyModeBtn').onclick = () => activateMode("study");
 
 let currentMode = null;
+let selectedSyllabusFile = null;
+let currentPlanObjectUrl = null;
 
 // Load tabs when popup opens (optional)
 document.addEventListener("DOMContentLoaded", loadTabs);
@@ -22,6 +35,7 @@ function activateMode(mode) {
 
   // Reset UI
   voiceControls.classList.add("hidden");
+  syllabusControls.classList.add("hidden");
   statusEl.textContent = "Mode: " + mode;
 
   if (mode === "voice") {
@@ -29,8 +43,9 @@ function activateMode(mode) {
   }
 
   if (mode === "syllabus") {
-    statusEl.textContent = "Open your syllabus tab. Extracting…";
-    chrome.runtime.sendMessage({ action: "openSyllabusPlanner" });
+    syllabusControls.classList.remove("hidden");
+    statusEl.textContent = "Upload your syllabus to build a plan.";
+    resetSyllabusUI();
 
     // Grab stored tabs
     loadTabs();
@@ -62,6 +77,131 @@ function loadTabs() {
     console.log("Tab list:\n" + list);
   });
 }
+
+//
+// SYLLABUS PLANNER LOGIC
+//
+function resetSyllabusUI() {
+  selectedSyllabusFile = null;
+  uploadSyllabusBtn.disabled = true;
+  uploadSyllabusBtn.textContent = "Generate Study Plan";
+  syllabusFileName.textContent = "No file selected.";
+  syllabusStatus.textContent = "Upload a PDF syllabus to create a personalized plan.";
+  syllabusStatus.classList.remove("error");
+  dropZoneWrapper.classList.add("hidden");
+  downloadPlanBtn.classList.add("hidden");
+  if (currentPlanObjectUrl) {
+    URL.revokeObjectURL(currentPlanObjectUrl);
+    currentPlanObjectUrl = null;
+  }
+}
+
+function handleSyllabusFile(file) {
+  if (!file) return;
+
+  if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+    syllabusStatus.textContent = "Please upload a PDF file.";
+    syllabusStatus.classList.add("error");
+    return;
+  }
+
+  selectedSyllabusFile = file;
+  syllabusFileName.textContent = file.name;
+  syllabusStatus.textContent = "Ready to generate your study plan.";
+  syllabusStatus.classList.remove("error");
+  uploadSyllabusBtn.disabled = false;
+  downloadPlanBtn.classList.add("hidden");
+  dropZoneWrapper.classList.remove("hidden");
+  if (currentPlanObjectUrl) {
+    URL.revokeObjectURL(currentPlanObjectUrl);
+    currentPlanObjectUrl = null;
+  }
+}
+
+function bindDropEvents() {
+  if (!syllabusDropZone) return;
+
+  ['dragenter', 'dragover'].forEach(evt => {
+    syllabusDropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      syllabusDropZone.classList.add('dragging');
+    });
+  });
+
+  ['dragleave', 'drop'].forEach(evt => {
+    syllabusDropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (evt === 'drop') {
+        const file = e.dataTransfer?.files?.[0];
+        handleSyllabusFile(file);
+      }
+      syllabusDropZone.classList.remove('dragging');
+    });
+  });
+
+  syllabusDropZone.addEventListener('click', () => syllabusFileInput.click());
+}
+
+async function uploadSyllabus() {
+  if (!selectedSyllabusFile) {
+    syllabusStatus.textContent = "Select a PDF before generating.";
+    syllabusStatus.classList.add("error");
+    return;
+  }
+
+  uploadSyllabusBtn.disabled = true;
+  uploadSyllabusBtn.textContent = "Generating…";
+  syllabusStatus.textContent = "Reading your syllabus and building a plan…";
+  syllabusStatus.classList.remove("error");
+
+  try {
+    const fd = new FormData();
+    fd.append("syllabus", selectedSyllabusFile);
+
+    const res = await fetch(`${API_BASE}/study-plan`, {
+      method: "POST",
+      body: fd
+    });
+
+    if (!res.ok) {
+      let errText = "Failed to generate study plan.";
+      try {
+        const data = await res.json();
+        errText = data.error || errText;
+      } catch (_) {
+        // Ignore JSON parse errors for non-JSON responses.
+      }
+      throw new Error(errText);
+    }
+
+    const blob = await res.blob();
+    if (currentPlanObjectUrl) {
+      URL.revokeObjectURL(currentPlanObjectUrl);
+    }
+    currentPlanObjectUrl = URL.createObjectURL(blob);
+
+    downloadPlanBtn.href = currentPlanObjectUrl;
+    downloadPlanBtn.download = `study-plan-${Date.now()}.pdf`;
+    downloadPlanBtn.classList.remove("hidden");
+
+    syllabusStatus.textContent = "Study plan ready! Download below.";
+
+  } catch (err) {
+    console.error("Study plan error", err);
+    syllabusStatus.textContent = err.message || "Failed to generate study plan.";
+    syllabusStatus.classList.add("error");
+  } finally {
+    uploadSyllabusBtn.disabled = !selectedSyllabusFile;
+    uploadSyllabusBtn.textContent = "Generate Study Plan";
+  }
+}
+
+browseSyllabusBtn?.addEventListener('click', () => syllabusFileInput.click());
+syllabusFileInput?.addEventListener('change', (e) => handleSyllabusFile(e.target.files[0]));
+uploadSyllabusBtn?.addEventListener('click', uploadSyllabus);
+bindDropEvents();
 
 //
 // VOICE MODE LOGIC

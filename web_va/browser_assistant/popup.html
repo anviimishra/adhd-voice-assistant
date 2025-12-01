@@ -11,26 +11,50 @@
   </div>
 
   <div class="mode-buttons">
-
-    <button id="syllabusBtn" class="mode-btn">
-      📘 Syllabus Planner
-    </button>
-
-    <button id="studyModeBtn" class="mode-btn">
-      🎯 Study Mode
-    </button>
-
-    <button id="voiceBtn" class="mode-btn voice-mode">
-      🎤 Voice Assistant
-    </button>
-
+    <button id="syllabusBtn" class="mode-btn">📘 Syllabus Planner</button>
+    <button id="studyModeBtn" class="mode-btn">🎯 Study Mode</button>
+    <button id="voiceBtn" class="mode-btn voice-mode">🎤 Voice Assistant</button>
   </div>
 
   <div id="modeContainer">
-
+    
     <div id="status" class="status">Ready</div>
 
-    <!-- Voice mode area -->
+    <!-- Syllabus section -->
+    <div id="syllabusControls" class="hidden syllabus-section">
+
+      <!-- ALWAYS VISIBLE Choose File button -->
+      <button id="browseSyllabusBtn" type="button" class="primary-action">
+        📄 Select Syllabus PDF
+      </button>
+
+      <!-- Hidden input (JS triggers this) -->
+      <input id="syllabusFileInput" type="file" accept="application/pdf" class="hidden-input">
+
+      <!-- Drop zone appears AFTER selecting the file -->
+      <div id="dropZoneWrapper" class="hidden">
+        <div id="syllabusDropZone" class="drop-zone">
+          <span>Drop your syllabus PDF here</span>
+        </div>
+      </div>
+
+      <div id="syllabusFileName" class="file-info">No file selected.</div>
+
+      <button id="uploadSyllabusBtn" class="primary-action" disabled>
+        Generate Study Plan
+      </button>
+
+      <div id="syllabusStatus" class="status-text">
+        Upload a PDF syllabus to create a personalized plan.
+      </div>
+
+      <a id="downloadPlanBtn" class="download-btn hidden" download="study-plan.pdf">
+        ⬇️ Download Study Plan
+      </a>
+
+    </div>
+
+    <!-- Voice Mode -->
     <div id="voiceControls" class="hidden">
       <button id="micBtn">🎤</button>
 

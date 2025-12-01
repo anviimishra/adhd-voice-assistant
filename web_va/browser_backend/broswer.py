@@ -5,11 +5,17 @@ import tempfile
 import subprocess
 import os
 import io
+import textwrap
 from gtts import gTTS
 from dotenv import load_dotenv
-from agent import ADHDWiz_respond
+from agent import ADHDWiz_respond, generate_study_plan_from_syllabus
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
+
+try:
+    from PyPDF2 import PdfReader
+except ImportError:
+    PdfReader = None
 
 
 load_dotenv()
@@ -25,74 +31,266 @@ GOOGLE_CLIENT_SECRETS_FILE = "credentials.json"
 GOOGLE_SCOPES = ["https://www.googleapis.com/auth/calendar"]
 GOOGLE_REDIRECT_URI = "http://localhost:5050/calendar/oauth2callback"
 
+
 def convert_webm_to_wav(webm_path, wav_path):
     """Convert WebM → WAV using ffmpeg"""
     subprocess.run([
         "ffmpeg", "-y",
         "-i", webm_path,
-        "-ac", "1",             # mono
-        "-ar", "16000",         # 16 kHz
+        "-ac", "1",
+        "-ar", "16000",
         wav_path
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+# ---------------------------------------------------------------
+# FIX 1: Helper to remove emojis / non-latin1 safely
+# ---------------------------------------------------------------
+def _to_latin1_safe(value: str) -> str:
+    """
+    Ensure value can be encoded in latin-1 by replacing unsupported characters
+    (e.g., emoji) with '?'.
+    """
+    return value.encode("latin-1", "replace").decode("latin-1")
+
+
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    """
+    Attempt to extract raw text from a PDF using PyPDF2 if available.
+    """
+    if not file_bytes or PdfReader is None:
+        if PdfReader is None:
+            print("PyPDF2 not installed; returning empty syllabus text.")
+        return ""
+
+    try:
+        reader = PdfReader(io.BytesIO(file_bytes))
+        pages_text = []
+        for page in reader.pages:
+            try:
+                pages_text.append(page.extract_text() or "")
+            except Exception as page_err:
+                print(f"Failed to read PDF page: {page_err}")
+        return "\n".join(pages_text)
+    except Exception as err:
+        print(f"PDF extraction error: {err}")
+        return ""
+
+
+def _escape_pdf_text(value: str) -> str:
+    """
+    Escape characters for PDF text drawing AND ensure latin1 safe.
+    """
+    value = _to_latin1_safe(value)
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def render_plan_pdf(plan_text: str) -> bytes:
+    """
+    Build a very small PDF document containing the study plan text.
+    """
+    cleaned_text = plan_text.strip() or "Study plan could not be generated."
+
+    # Ensure whole content is latin1-encodable
+    cleaned_text = _to_latin1_safe(cleaned_text)
+
+    wrapped_lines = []
+    for paragraph in cleaned_text.splitlines():
+        if paragraph.strip() == "":
+            wrapped_lines.append("")
+            continue
+        wrapped_lines.extend(textwrap.wrap(paragraph, width=90) or [""])
+
+    if not wrapped_lines:
+        wrapped_lines = ["Study plan could not be generated."]
+
+    lines_per_page = 40
+    pages = [
+        wrapped_lines[i:i + lines_per_page]
+        for i in range(0, len(wrapped_lines), lines_per_page)
+    ]
+
+    next_obj_id = 1
+
+    def reserve_obj_id():
+        nonlocal next_obj_id
+        obj_id = next_obj_id
+        next_obj_id += 1
+        return obj_id
+
+    catalog_id = reserve_obj_id()
+    pages_id = reserve_obj_id()
+    font_id = reserve_obj_id()
+
+    page_entries = []
+    for page_lines in pages:
+        content_id = reserve_obj_id()
+        page_id = reserve_obj_id()
+        page_entries.append((page_id, content_id, page_lines))
+
+    objects = {}
+
+    def set_object(obj_id, data):
+        if isinstance(data, bytes):
+            objects[obj_id] = data
+        else:
+            # encode safely into latin-1
+            safe = _to_latin1_safe(data)
+            objects[obj_id] = safe.encode("latin-1")
+
+    # font
+    set_object(font_id, b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+
+    left_margin = 72
+    start_height = 760
+    line_height = 16
+
+    for page_id, content_id, lines in page_entries:
+        buffer_lines = [
+            "BT",
+            "/F1 12 Tf",
+            f"{left_margin} {start_height} Td",
+        ]
+        first_line = True
+        for line in lines:
+            if not first_line:
+                buffer_lines.append(f"0 -{line_height} Td")
+            else:
+                first_line = False
+            safe_line = _escape_pdf_text(line)
+            buffer_lines.append(f"({safe_line}) Tj")
+        buffer_lines.append("ET")
+
+        stream_text = "\n".join(buffer_lines)
+        stream_data = stream_text.encode("latin-1", "replace")
+
+        content_stream = (
+            f"<< /Length {len(stream_data)} >>\nstream\n".encode("latin-1") +
+            stream_data +
+            b"\nendstream"
+        )
+        set_object(content_id, content_stream)
+
+        page_obj = (
+            f"<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 612 792] "
+            f"/Resources << /Font << /F1 {font_id} 0 R >> >> "
+            f"/Contents {content_id} 0 R >>"
+        )
+        set_object(page_id, page_obj)
+
+    kids_refs = " ".join(f"{page_id} 0 R" for page_id, _, _ in page_entries)
+    set_object(pages_id, f"<< /Type /Pages /Kids [{kids_refs}] /Count {len(page_entries)} >>")
+    set_object(catalog_id, f"<< /Type /Catalog /Pages {pages_id} 0 R >>")
+
+    pdf_buffer = io.BytesIO()
+    pdf_buffer.write(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+
+    offsets = [0] * next_obj_id
+
+    for obj_id in range(1, next_obj_id):
+        offsets[obj_id] = pdf_buffer.tell()
+        pdf_buffer.write(f"{obj_id} 0 obj\n".encode("ascii"))
+        pdf_buffer.write(objects[obj_id])
+        pdf_buffer.write(b"\nendobj\n")
+
+    xref_position = pdf_buffer.tell()
+    pdf_buffer.write(f"xref\n0 {next_obj_id}\n".encode("ascii"))
+    pdf_buffer.write(b"0000000000 65535 f \n")
+    for obj_id in range(1, next_obj_id):
+        pdf_buffer.write(f"{offsets[obj_id]:010} 00000 n \n".encode("ascii"))
+
+    pdf_buffer.write(
+        f"trailer\n<< /Size {next_obj_id} /Root {catalog_id} 0 R >>\n".encode("ascii")
+    )
+    pdf_buffer.write(f"startxref\n{xref_position}\n%%EOF".encode("ascii"))
+
+    return pdf_buffer.getvalue()
+
+
+# --------------------------------------------------------------------------------
+# ROUTES
+# --------------------------------------------------------------------------------
 
 @app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "healthy"})
 
+
 @app.route('/transcribe', methods=['POST'])
 def transcribe_audio():
-    """Convert speech to text"""
     try:
         if 'audio' not in request.files:
             return jsonify({"error": "No audio file"}), 400
-        
-        # Save WebM temp file
+
         audio_file = request.files['audio']
         with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as temp_webm:
             audio_file.save(temp_webm.name)
             webm_path = temp_webm.name
 
-        # Convert to WAV
         wav_path = webm_path.replace('.webm', '.wav')
         convert_webm_to_wav(webm_path, wav_path)
 
-        # Transcribe WAV
         recognizer = sr.Recognizer()
         with sr.AudioFile(wav_path) as source:
             audio_data = recognizer.record(source)
             text = recognizer.recognize_google(audio_data)
 
-        # Cleanup
         os.unlink(webm_path)
         os.unlink(wav_path)
 
         return jsonify({"text": text})
-    
+
     except sr.UnknownValueError:
         return jsonify({"error": "Could not understand audio"}), 400
     except Exception as e:
         print("Transcription error:", e)
         return jsonify({"error": str(e)}), 500
 
+
 @app.route('/chat', methods=['POST'])
 def chat():
-    """Use ADHDWiz agent to respond to user"""
     try:
         msg = request.json.get("message", "")
-
         if not msg:
             return jsonify({"response": "No message received."})
-
         ai = ADHDWiz_respond(msg)
         return jsonify({"response": ai})
-
     except Exception as e:
         print("AI Error:", e)
         return jsonify({"response": "Oops—ADHDWiz lost the thread 😅 try again?"})
 
+
+@app.route('/study-plan', methods=['POST'])
+def study_plan():
+    try:
+        upload = request.files.get("syllabus")
+        if not upload:
+            return jsonify({"error": "Missing syllabus PDF."}), 400
+
+        pdf_bytes = upload.read()
+        syllabus_text = extract_text_from_pdf(pdf_bytes)
+        plan_text = generate_study_plan_from_syllabus(
+            syllabus_text or upload.filename or ""
+        )
+
+        plan_pdf = render_plan_pdf(plan_text)
+
+        buffer = io.BytesIO(plan_pdf)
+        buffer.seek(0)
+        return send_file(
+            buffer,
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name="study-plan.pdf"
+        )
+
+    except Exception as e:
+        print(f"Study plan generation error: {e}")
+        return jsonify({"error": "Could not generate study plan."}), 500
+
+
 @app.route('/speak', methods=['POST'])
 def text_to_speech():
-    """Convert text to speech"""
     try:
         data = request.json
         text = data.get('text', '')
@@ -106,17 +304,14 @@ def text_to_speech():
         buffer.seek(0)
 
         return send_file(buffer, mimetype='audio/mpeg')
-    
+
     except Exception as e:
         print("TTS Error:", e)
         return jsonify({"error": str(e)}), 500
 
+
 @app.route("/calendar/auth")
 def calendar_auth():
-    """
-    Start Google OAuth flow for Calendar.
-    User visits this once to connect their Google account.
-    """
     try:
         flow = Flow.from_client_secrets_file(
             GOOGLE_CLIENT_SECRETS_FILE,
@@ -132,22 +327,21 @@ def calendar_auth():
 
         session["oauth_state"] = state
         return redirect(authorization_url)
-    
+
     except Exception as e:
         print(f"OAuth auth error: {e}")
-        return f"<h2>OAuth Error</h2><p>{str(e)}</p><p>Make sure credentials.json exists and is valid.</p>", 500
+        return f"<h2>OAuth Error</h2><p>{str(e)}</p>", 500
 
 
 @app.route("/calendar/oauth2callback")
 def calendar_oauth2callback():
-    """
-    Google redirects here after the user approves access.
-    We exchange the code for tokens and save them to token.json.
-    """
     try:
         state = session.get("oauth_state")
         if not state:
-            return "<h2>Error</h2><p>Missing OAuth state. Please start again at <a href='/calendar/auth'>/calendar/auth</a></p>", 400
+            return (
+                "<h2>Error</h2><p>Missing OAuth state. Start again at "
+                "<a href='/calendar/auth'>/calendar/auth</a></p>"
+            ), 400
 
         flow = Flow.from_client_secrets_file(
             GOOGLE_CLIENT_SECRETS_FILE,
@@ -159,46 +353,39 @@ def calendar_oauth2callback():
         flow.fetch_token(authorization_response=request.url)
         creds = flow.credentials
 
-        # Save credentials to token.json so calendar_tool.py can use them
         with open("token.json", "w") as token_file:
             token_file.write(creds.to_json())
 
         return (
             "<h2>Google Calendar connected ✅</h2>"
-            "<p>You can close this tab and go back to ADHDWiz.</p>"
+            "<p>You can close this tab.</p>"
         )
-    
+
     except Exception as e:
         print(f"OAuth callback error: {e}")
-        return f"<h2>OAuth Error</h2><p>{str(e)}</p><p>Please try again at <a href='/calendar/auth'>/calendar/auth</a></p>", 500
+        return (
+            f"<h2>OAuth Error</h2><p>{str(e)}</p>"
+            "<p>Please try again.</p>"
+        ), 500
 
 
 @app.route('/calendar/add-event', methods=['POST'])
 def add_calendar_event():
-    """
-    Add an event to Google Calendar
-    Expects JSON: {
-        "summary": "Event title",
-        "start": "2025-12-01T14:00:00",
-        "end": "2025-12-01T15:00:00",
-        "description": "Optional description"
-    }
-    """
     try:
         from calendar_tool import add_event
-        
+
         data = request.json
         summary = data.get('summary')
         start = data.get('start')
         end = data.get('end')
         description = data.get('description', '')
-        
+
         if not summary or not start or not end:
-            return jsonify({"error": "Missing required fields: summary, start, end"}), 400
-        
+            return jsonify({"error": "Missing required fields"}), 400
+
         result = add_event(summary, start, end, description)
         return jsonify({"success": True, "event": result})
-    
+
     except Exception as e:
         print(f"Add event error: {e}")
         return jsonify({"error": str(e)}), 500
