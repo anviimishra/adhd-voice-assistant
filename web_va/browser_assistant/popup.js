@@ -266,6 +266,24 @@ async function processAudio(blob) {
 
     const chat = await chatRes.json();
     response.textContent = chat.response;
+    if (chat.response.startsWith("Here are the tabs")) {
+    // Ask backend directly for the flat tab list
+    fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: transcript.textContent })
+    })
+        .then(res => res.json())
+        .then(data => {
+        if (data.tabs && data.tabs.length > 0) {
+            chrome.runtime.sendMessage({
+            action: "groupTabs",
+            task: data.task,
+            tabs: data.tabs
+            });
+        }
+        });
+    }
 
     // STEP 3: Speak result
     const speakRes = await fetch(`${API_BASE}/speak`, {

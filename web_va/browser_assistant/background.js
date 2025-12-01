@@ -9,6 +9,7 @@ async function syncTabsToBackend(tabs) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         tabs: tabs.map(tab => ({
+            id: tab.id, 
           title: tab.title || "",
           url: tab.url || "",
           content: (tab.content || "").slice(0, 8000)
@@ -101,17 +102,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     saveAllTabs();
   }
 });
-
-// Manual trigger from popup (optional)
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+
+  // ---- storeTabs ----
   if (msg.action === "storeTabs") {
     saveAllTabs();
+    sendResponse({ success: true });
+    return true;
   }
-});
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // Already have storeTabs above — leave it
-
+  // ---- groupTabs ----
   if (msg.action === "groupTabs" && msg.tabs && msg.task) {
     const tabIds = msg.tabs
       .map(t => t.id)
@@ -119,10 +119,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
     if (tabIds.length === 0) {
       sendResponse({ success: false, error: "No valid tab IDs" });
-      return;
+      return true;
     }
 
-    chrome.tabs.group({ tabIds }, (groupId) => {
+    console.log("📌 Grouping IDs:", tabIds);
+
+
+    chrome.tabs.group({ tabIds }, groupId => {
       if (chrome.runtime.lastError) {
         sendResponse({ success: false, error: chrome.runtime.lastError.message });
         return;
@@ -139,4 +142,3 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // async
   }
 });
-
