@@ -254,8 +254,21 @@ def chat():
         msg = request.json.get("message", "")
         if not msg:
             return jsonify({"response": "No message received."})
-        ai = ADHDWiz_respond(msg)
-        return jsonify({"response": ai})
+
+        # Normal ADHDWiz text
+        ai_text = ADHDWiz_respond(msg)
+
+        # Get tab suggestions (includes tab.id)
+        from agent import get_relevant_tabs_flat
+        tab_data = get_relevant_tabs_flat(msg)
+
+        # Return BOTH text + tabs
+        return jsonify({
+            "response": ai_text,
+            "task": tab_data.get("task"),
+            "tabs": tab_data.get("tabs", [])
+        })
+
     except Exception as e:
         print("AI Error:", e)
         return jsonify({"response": "Oops—ADHDWiz lost the thread 😅 try again?"})
