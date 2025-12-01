@@ -5,11 +5,11 @@ import json
 from datetime import datetime, timedelta
 import re
 
-
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 from calendar_tool import get_today_schedule, add_event, get_next_free_slots
+from tabs_retriever import group_tabs_for_subtasks, retriever_has_tabs
 
 
 def parse_event_from_message(user_message: str) -> dict:
@@ -102,17 +102,71 @@ def ADHDWiz_respond(user_message: str) -> str:
     - Detects task overwhelm and auto-creates subtask calendar blocks
     - Detects if user wants to add an event
     - Detects if user wants schedule summary
+    - Detects if user wants tab organization
     - Otherwise responds in ADHDWiz voice
     """
     user_lower = user_message.lower()
 
+    # -------------------------------------------------
+    # 0. EXPLICIT TAB ORGANIZATION REQUESTS
+    # -------------------------------------------------
+    tab_triggers = [
+        "organize tabs",
+        "organise tabs",
+        "help with tabs",
+        "relevant tabs",
+        "which tabs",
+        "what tabs",
+        "tabs for",
+        "show tabs",
+        "find tabs for",
+        "help me focus on",
+    ]
+
+    if any(trigger in user_lower for trigger in tab_triggers):
+        try:
+            results = get_relevant_tabs_flat(user_message)
+
+            if results.get("error"):
+                return "I couldn't find any synced tabs yet. Try syncing them first."
+
+            task = results["task"]
+            tabs = results["tabs"]
+
+            if not tabs:
+                return f"I looked at your tabs but didn’t find anything relevant to {task}."
+
+            response = [f"Here are the tabs most relevant to {task}:"]
+
+            for tab in tabs:
+                title = tab.get("title") or "(no title)"
+                url = tab.get("url") or ""
+                response.append(f"- {title} ({url})")
+
+            return "\n".join(response).strip()
+
+        except Exception as e:
+            print("Tab organization error:", e)
+            return "Something went wrong while organizing your tabs."
+
+
+        except Exception as e:
+            print(f"Tab organization error: {e}")
+            # Fall through to normal behavior if something explodes
+            pass
+
+    # -------------------------------------------------
     # 1. DETECT TASK OVERWHELM / STARTING CONFUSION
+    # -------------------------------------------------
     overwhelm_triggers = [
         "don't know where to start",
+        "dont know where to start",
         "don't know how to start",
+        "dont know how to start",
         "overwhelmed",
         "too much",
         "can't start",
+        "cant start",
         "stuck",
         "procrastinating",
         "need to do",
@@ -120,8 +174,10 @@ def ADHDWiz_respond(user_message: str) -> str:
         "should do",
         "supposed to",
         "paralyzed",
+        "paralysed",
         "freezing",
-        "can't focus on"
+        "can't focus on",
+        "cant focus on",
     ]
     
     if any(trigger in user_lower for trigger in overwhelm_triggers):
@@ -154,19 +210,19 @@ def ADHDWiz_respond(user_message: str) -> str:
             
             # Generate encouraging response
             response = f"""
-I hear you — **{breakdown['task_name']}** feels like a lot right now. Let's make it tiny.
+I hear you — {breakdown['task_name']} feels like a lot right now. Let's make it tiny.
 
 I broke it into 3 micro-steps and added them to your calendar:
 
 """
             for i, evt in enumerate(added_events, 1):
-                response += f"{i}. **{evt['name']}** — {evt['time']} ({evt['duration']} min)\n"
+                response += f"{i}. {evt['name']} — {evt['time']} ({evt['duration']} min)\n"
             
-            response += f"""
+            response += """
 You don't have to do it all at once. Just show up for step 1. That's it.
 
 The rest will follow. You've got this.
-            """
+"""
             
             return response.strip()
         
@@ -175,7 +231,9 @@ The rest will follow. You've got this.
             # Fall through to normal response if this fails
             pass
 
+    # -------------------------------------------------
     # 2. Detect explicit event creation requests
+    # -------------------------------------------------
     add_event_triggers = [
         "add event",
         "create event",
@@ -200,17 +258,19 @@ The rest will follow. You've got this.
             )
             
             return f"""
-✅ Got it! I added "{event_details['summary']}" to your calendar.
+Got it. I added "{event_details['summary']}" to your calendar.
 
-📅 **When**: {event_details['start_time'].split('T')[0]} at {event_details['start_time'].split('T')[1][:5]}
+When: {event_details['start_time'].split('T')[0]} at {event_details['start_time'].split('T')[1][:5]}
 
-You're all set! Need anything else? 🌟
+You are all set. Need anything else?
             """.strip()
         
         except Exception as e:
-            return f"Hmm, I had trouble adding that event. Could you try again with more details? (Error: {str(e)})"
+            return f"I had trouble adding that event. Could you try again with a bit more detail? (Error: {str(e)})"
 
+    # -------------------------------------------------
     # 3. Detect schedule queries
+    # -------------------------------------------------
     schedule_triggers = [
         "what do i have",
         "what's next",
@@ -231,7 +291,7 @@ You're all set! Need anything else? 🌟
         {schedule_text}
 
         Summarize this in a warm, ADHD-friendly tone.
-        Use bullet points and reassuring words.
+        Use short paragraphs and reassuring words.
         """
 
         completion = client.chat.completions.create(
@@ -244,7 +304,9 @@ You're all set! Need anything else? 🌟
 
         return completion.choices[0].message.content.strip()
 
-    # 4. Normal ADHDWiz chat
+    # -------------------------------------------------
+    # 4. Normal ADHDWiz chat (no tools)
+    # -------------------------------------------------
     system_prompt = """
     You are ADHDWiz — a warm, non-judgmental ADHD support assistant.
     
@@ -255,7 +317,7 @@ You're all set! Need anything else? 🌟
     Avoid symbols like *, -, •, >, _, or fancy formatting.
 
     Style:
-    - short paragraphs or bullet points
+    - short paragraphs
     - supportive, casual tone
     - micro-steps (30–60 seconds)
     - no shame, lots of validation
@@ -264,16 +326,73 @@ You're all set! Need anything else? 🌟
     acknowledge their feelings and offer encouragement.
     """
 
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message}
+    ]
+
+    tools = [
+        {
+            "name": "get_relevant_tab_groups",
+            "description": "Find the browser tabs that best support a task and group them by micro-subtasks.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_description": {
+                        "type": "string",
+                        "description": "What the user is trying to accomplish. Example: 'Finish my biology lab writeup'."
+                    }
+                },
+                "required": ["task_description"]
+            }
+        }
+    ]
+
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
-        ],
+        messages=messages,
+        functions=tools,
+        # IMPORTANT CHANGE: do not auto-call tools anymore
+        function_call="none",
         temperature=0.85
     )
 
-    return completion.choices[0].message.content.strip()
+    first_choice = completion.choices[0].message
+
+    # With function_call="none", this block is basically dead code now,
+    # but we leave it for minimal-diff compatibility.
+    if getattr(first_choice, "function_call", None):
+        func_name = first_choice.function_call.name
+        if func_name == "get_relevant_tab_groups":
+            try:
+                args = json.loads(first_choice.function_call.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+
+            tool_payload = get_relevant_tab_groups(args.get("task_description", user_message))
+
+            messages.append({
+                "role": first_choice.role,
+                "content": first_choice.content,
+                "function_call": {
+                    "name": func_name,
+                    "arguments": first_choice.function_call.arguments
+                }
+            })
+            messages.append({
+                "role": "function",
+                "name": func_name,
+                "content": json.dumps(tool_payload)
+            })
+
+            followup = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                temperature=0.75
+            )
+            return followup.choices[0].message.content.strip()
+
+    return first_choice.content.strip()
 
 
 def generate_study_plan_from_syllabus(syllabus_text: str) -> str:
@@ -310,3 +429,75 @@ Syllabus notes:
     )
 
     return response.choices[0].message.content.strip()
+
+
+def extract_core_task(user_message: str) -> str:
+    """
+    Extract the actual study/task topic from natural language.
+    Uses GPT to strip away phrases like:
+    - "find tabs for"
+    - "organize tabs for"
+    - "help me with"
+    - "I need to study"
+    
+    Returns only the keywords describing the academic task.
+    """
+
+    prompt = f"""
+    Extract ONLY the core academic or study topic from this message:
+    "{user_message}"
+
+    Rules:
+    - Remove phrases like "find tabs for", "organize tabs", "help with", etc.
+    - Return ONLY the subject/topic, not a full sentence.
+    - Keep it short: 3–8 words max.
+    - Examples:
+        "find tabs for linear algebra midterm" -> "linear algebra midterm"
+        "help me study for biology exam" -> "biology exam"
+        "organize tabs for my stats homework" -> "statistics homework"
+        "what tabs should I use for discrete structures" -> "discrete structures"
+    - Respond with plain text only (no JSON).
+    """
+
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": "Extract the clean academic topic only."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.2
+    )
+
+    return response.choices[0].message.content.strip()
+
+def get_relevant_tabs_flat(task_description: str) -> dict:
+    raw = (task_description or "").strip()
+
+    if not retriever_has_tabs():
+        return {"task": raw, "tabs": [], "error": "No synced tabs available."}
+
+    try:
+        # STEP 1 — Extract clean academic task
+        core_task = extract_core_task(raw)
+
+        # STEP 2 — perform semantic search
+        from tabs_retriever import _retriever
+        matches = _retriever.search(core_task, top_k=10, min_score=0.03)
+
+        # IMPORTANT — Pull tabId from original tab list
+        flat_results = []
+        for m in matches:
+            for t in _retriever.tabs:
+                if t["url"] == m["url"]:    # match exact tab
+                    m["id"] = t.get("id")    # append tabId for grouping
+                    break
+            flat_results.append(m)
+
+        return {
+            "task": core_task,
+            "tabs": flat_results,
+            "source": "flat-search"
+        }
+
+    except Exception as exc:
+        return {"task": raw, "tabs": [], "error": str(exc)}

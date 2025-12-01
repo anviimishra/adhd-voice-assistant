@@ -9,6 +9,7 @@ import textwrap
 from gtts import gTTS
 from dotenv import load_dotenv
 from agent import ADHDWiz_respond, generate_study_plan_from_syllabus
+from tabs_retriever import sync_tabs_snapshot
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 
@@ -258,6 +259,22 @@ def chat():
     except Exception as e:
         print("AI Error:", e)
         return jsonify({"response": "Oops—ADHDWiz lost the thread 😅 try again?"})
+
+
+@app.route('/tabs/sync', methods=['POST'])
+def sync_tabs():
+    """Store the latest snapshot of open tabs for retrieval."""
+    try:
+        payload = request.get_json(silent=True) or {}
+        tabs = payload.get("tabs", [])
+        if not isinstance(tabs, list):
+            return jsonify({"error": "tabs must be a list"}), 400
+
+        sync_tabs_snapshot(tabs)
+        return jsonify({"success": True, "count": len(tabs)})
+    except Exception as e:
+        print(f"Tab sync error: {e}")
+        return jsonify({"error": "Failed to sync tabs"}), 500
 
 
 @app.route('/study-plan', methods=['POST'])

@@ -1,4 +1,24 @@
+const API_BASE = 'http://localhost:5050';
+
 console.log("ADHD Study Assistant: Background loaded");
+
+async function syncTabsToBackend(tabs) {
+  try {
+    await fetch(`${API_BASE}/tabs/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tabs: tabs.map(tab => ({
+          title: tab.title || "",
+          url: tab.url || "",
+          content: (tab.content || "").slice(0, 8000)
+        }))
+      })
+    });
+  } catch (err) {
+    console.warn("Failed to sync tabs to backend", err);
+  }
+}
 
 // Utility: Extract readable content from a tab
 async function extractTabContent(tabId) {
@@ -49,6 +69,8 @@ async function saveAllTabs() {
     chrome.storage.local.set({ openTabs: output }, () => {
       console.log("✨ Stored all tabs:", output);
     });
+
+    syncTabsToBackend(output);
   });
 }
 
@@ -86,3 +108,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     saveAllTabs();
   }
 });
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Already have storeTabs above — leave it
+
+  if (msg.action === "groupTabs" && msg.tabs && msg.task) {
+    const tabIds = msg.tabs
+      .map(t => t.id)
+      .filter(id => typeof id === "number");
+
+    if (tabIds.length === 0) {
+      sendResponse({ success: false, error: "No valid tab IDs" });
+      return;
+    }
+
+    chrome.tabs.group({ tabIds }, (groupId) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+
+      chrome.tabGroups.update(groupId, {
+        title: msg.task,
+        color: "blue"
+      }, () => {
+        sendResponse({ success: true, groupId });
+      });
+    });
+
+    return true; // async
+  }
+});
+
