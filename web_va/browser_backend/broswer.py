@@ -11,7 +11,13 @@ from dotenv import load_dotenv
 from agent import ADHDWiz_respond, generate_study_plan_from_syllabus
 from tabs_retriever import sync_tabs_snapshot
 from google_auth_oauthlib.flow import Flow
-from google.oauth2.credentials import Credentials
+from openai import OpenAI
+from dotenv import load_dotenv
+import json
+from datetime import datetime, timezone
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 try:
     from PyPDF2 import PdfReader
@@ -420,6 +426,57 @@ def add_calendar_event():
         print(f"Add event error: {e}")
         return jsonify({"error": str(e)}), 500
 
+@app.post("/focus-check")
+def focus_check():
+    body = request.get_json()
+    if not body or "image" not in body:
+        return jsonify({"error": "Missing base64 image"}), 400
+
+    image_b64 = body["image"]
+
+    try:
+        # GPT Vision request
+        response = client.chat.completions.create(
+            model="gpt-4.1",   # or gpt-4o, gpt-4o-mini
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a focus-monitoring assistant. "
+                        "Analyze webcam snapshots to determine if the student "
+                        "is focused or distracted.\n"
+                        "Return JSON only:\n"
+                        "{ 'state': 'focused'|'distracted', 'confidence': 0-1, 'explanation': '' }"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Analyze this image."},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/jpeg;base64,{image_b64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            temperature=0.2
+        )
+
+        raw = response.choices[0].message.content
+        data = json.loads(raw)
+
+        return jsonify({
+            "state": data.get("state", "unknown"),
+            "confidence": data.get("confidence", 0.0),
+            "explanation": data.get("explanation", "")
+        })
+
+    except Exception as e:
+        print("Focus check error:", e)
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True, port=5050)

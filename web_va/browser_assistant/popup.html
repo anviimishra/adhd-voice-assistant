@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <link rel="stylesheet" href="popup.css">
 </head>
+
 <body>
 
   <div class="header">
@@ -20,18 +21,29 @@
     
     <div id="status" class="status">Ready</div>
 
-    <!-- Syllabus section -->
+<!-- ================= STUDY MODE ================= -->
+<div id="studyControls" class="hidden study-section">
+
+  <div class="study-meta">
+    <div id="studyStateLabel" class="study-state">Camera idle.</div>
+    <div id="studyConfidence" class="study-confidence"></div>
+  </div>
+
+  <button id="studyToggleBtn" class="primary-action">
+    Start Focus Watch
+  </button>
+
+</div>
+
+    <!-- ================= SYLLABUS PLANNER ================= -->
     <div id="syllabusControls" class="hidden syllabus-section">
 
-      <!-- ALWAYS VISIBLE Choose File button -->
       <button id="browseSyllabusBtn" type="button" class="primary-action">
         📄 Select Syllabus PDF
       </button>
 
-      <!-- Hidden input (JS triggers this) -->
       <input id="syllabusFileInput" type="file" accept="application/pdf" class="hidden-input">
 
-      <!-- Drop zone appears AFTER selecting the file -->
       <div id="dropZoneWrapper" class="hidden">
         <div id="syllabusDropZone" class="drop-zone">
           <span>Drop your syllabus PDF here</span>
@@ -54,7 +66,7 @@
 
     </div>
 
-    <!-- Voice Mode -->
+    <!-- ================= VOICE MODE ================= -->
     <div id="voiceControls" class="hidden">
       <button id="micBtn">🎤</button>
 
@@ -64,7 +76,6 @@
       <div class="label">Assistant:</div>
       <div id="response">...</div>
     </div>
-
   </div>
 
   <script src="popup.js"></script>

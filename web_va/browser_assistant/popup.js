@@ -12,8 +12,19 @@ const uploadSyllabusBtn = document.getElementById('uploadSyllabusBtn');
 const syllabusStatus = document.getElementById('syllabusStatus');
 const syllabusFileName = document.getElementById('syllabusFileName');
 const downloadPlanBtn = document.getElementById('downloadPlanBtn');
+const studyControls = document.getElementById("studyControls");
+const studyToggleBtn = document.getElementById("studyToggleBtn");
+const studyStateLabel = document.getElementById("studyStateLabel");
+const studyConfidence = document.getElementById("studyConfidence");
 browseSyllabusBtn.addEventListener('click', () => syllabusFileInput.click());
 
+let studyStream = null;
+let studyInterval = null;
+let monitorActive = false;
+
+
+const captureCanvas = document.createElement("canvas");
+const captureCtx = captureCanvas.getContext("2d");
 
 const transcript = document.getElementById('transcript');
 const response = document.getElementById('response');
@@ -27,15 +38,25 @@ let currentMode = null;
 let selectedSyllabusFile = null;
 let currentPlanObjectUrl = null;
 
+// Toggle button
+studyToggleBtn?.addEventListener("click", () => {
+  if (!monitorActive) startFocusWatch();
+  else stopFocusWatch();
+});
+
+
 // Load tabs when popup opens (optional)
 document.addEventListener("DOMContentLoaded", loadTabs);
 
+
+// When user enters study mode
 function activateMode(mode) {
   currentMode = mode;
 
-  // Reset UI
   voiceControls.classList.add("hidden");
   syllabusControls.classList.add("hidden");
+  studyControls.classList.add("hidden");
+
   statusEl.textContent = "Mode: " + mode;
 
   if (mode === "voice") {
@@ -44,22 +65,115 @@ function activateMode(mode) {
 
   if (mode === "syllabus") {
     syllabusControls.classList.remove("hidden");
-    statusEl.textContent = "Upload your syllabus to build a plan.";
     resetSyllabusUI();
-
-    // Grab stored tabs
-    loadTabs();
   }
 
   if (mode === "study") {
-    statusEl.textContent = "Study Mode enabled (focus + distraction monitoring)";
-    chrome.runtime.sendMessage({ action: "startStudyMode" });
+    studyControls.classList.remove("hidden");
+    statusEl.textContent = "Study Mode enabled. Click Start Focus Watch.";
   }
 }
 
-//
-// AUTO-LOAD ALL STORED TABS
-//
+async function startFocusWatch() {
+  try {
+    studyStream = await navigator.mediaDevices.getUserMedia({ video: true });
+
+    monitorActive = true;
+    studyToggleBtn.textContent = "Stop Focus Watch";
+    studyStateLabel.textContent = "Calibrating…";
+    statusEl.textContent = "Focus Watch running.";
+
+    // capture every 5 seconds
+    studyInterval = setInterval(captureAndAnalyze, 5000);
+
+  } catch (err) {
+    statusEl.textContent = "Camera access denied.";
+  }
+}
+
+function stopFocusWatch() {
+  monitorActive = false;
+
+  if (studyInterval) clearInterval(studyInterval);
+  studyInterval = null;
+
+  if (studyStream) {
+    studyStream.getTracks().forEach(t => t.stop());
+    studyStream = null;
+  }
+
+  studyToggleBtn.textContent = "Start Focus Watch";
+  studyStateLabel.textContent = "Camera idle.";
+  studyConfidence.textContent = "";
+  statusEl.textContent = "Study Mode stopped.";
+}
+
+async function captureAndAnalyze() {
+  if (!monitorActive || !studyStream) return;
+
+  const track = studyStream.getVideoTracks()[0];
+  const imageCapture = new ImageCapture(track);
+
+  try {
+    const bitmap = await imageCapture.grabFrame();
+
+    captureCanvas.width = bitmap.width;
+    captureCanvas.height = bitmap.height;
+    captureCtx.drawImage(bitmap, 0, 0);
+
+    const dataUrl = captureCanvas.toDataURL("image/jpeg", 0.85);
+    const base64 = dataUrl.split(",")[1];
+
+    analyzeFocus(base64);
+
+  } catch (err) {
+    console.error("Frame error:", err);
+  }
+}
+
+async function analyzeFocus(imageB64) {
+  studyStateLabel.textContent = "Checking…";
+  studyConfidence.textContent = "";
+
+  try {
+    const res = await fetch(`${API_BASE}/focus-check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image: imageB64 })
+    });
+
+    const data = await res.json();
+    const state = (data.state || "").toLowerCase();
+    const confidence = Math.round((data.confidence || 0) * 100);
+
+    if (state === "distracted") {
+      studyStateLabel.textContent = "Distracted!";
+      studyStateLabel.classList.add("distracted");
+      studyStateLabel.classList.remove("focused");
+
+      studyConfidence.textContent = `Confidence: ${confidence}%`;
+      statusEl.textContent = "⚠️ Heads up — Stay focused!";
+
+      chrome.runtime.sendMessage({
+        action: "nudge",
+        message: "You're getting distracted — come back to focus! 💡"
+      });
+    } else {
+      studyStateLabel.textContent = "Focused";
+      studyStateLabel.classList.add("focused");
+      studyStateLabel.classList.remove("distracted");
+
+      studyConfidence.textContent = `Confidence: ${confidence}%`;
+      statusEl.textContent = "You're doing great!";
+    }
+
+  } catch (err) {
+    studyStateLabel.textContent = "Error analyzing focus.";
+    studyConfidence.textContent = err.message;
+  }
+}
+
+
 function loadTabs() {
   chrome.storage.local.get("openTabs", (data) => {
     if (!data.openTabs) {
@@ -78,9 +192,7 @@ function loadTabs() {
   });
 }
 
-//
-// SYLLABUS PLANNER LOGIC
-//
+
 function resetSyllabusUI() {
   selectedSyllabusFile = null;
   uploadSyllabusBtn.disabled = true;
